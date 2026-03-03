@@ -1,0 +1,592 @@
+import React, { useState, useRef } from "react";
+import { motion, AnimatePresence } from "motion/react";
+import { Upload, Download, X, Palette, Type, Image as ImageIcon, CheckCircle2, Trash2, Plus, ImagePlus } from "lucide-react";
+import clsx from "clsx";
+
+interface ImageInfo {
+  file: File;
+  url: string;
+  width: number;
+  height: number;
+}
+
+interface GridSlot {
+  id: string;
+  image: ImageInfo | null;
+}
+
+export default function CollageGenerator() {
+  const [slots, setSlots] = useState<GridSlot[]>([
+    { id: "1", image: null },
+    { id: "2", image: null },
+    { id: "3", image: null },
+  ]);
+  const [background, setBackground] = useState<"gray-black" | "brown-black" | "white">("gray-black");
+  const [bgImage, setBgImage] = useState<ImageInfo | null>(null);
+  const [logo, setLogo] = useState<{ file: File; url: string } | null>(null);
+  const [showImageNames, setShowImageNames] = useState(false);
+
+  const logoInputRef = useRef<HTMLInputElement>(null);
+  const bgImageInputRef = useRef<HTMLInputElement>(null);
+  const bulkInputRef = useRef<HTMLInputElement>(null);
+  const slotInputRefs = useRef<{ [key: string]: HTMLInputElement | null }>({});
+
+  const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      const file = e.target.files[0];
+      setLogo({ file, url: URL.createObjectURL(file) });
+    }
+  };
+
+  const handleBgImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      const file = e.target.files[0];
+      const url = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = () => {
+        setBgImage({ file, url, width: img.width, height: img.height });
+      };
+      img.src = url;
+    }
+  };
+
+  const handleSlotUpload = (slotId: string, file: File) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      setSlots((prev) =>
+        prev.map((s) =>
+          s.id === slotId
+            ? { ...s, image: { file, url, width: img.width, height: img.height } }
+            : s
+        )
+      );
+    };
+    img.src = url;
+  };
+
+  const handleBulkUpload = (files: FileList | null) => {
+    if (!files) return;
+    const filesArray = Array.from(files);
+    filesArray.forEach((file) => {
+      const url = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = () => {
+        setSlots((prev) => [
+          ...prev,
+          {
+            id: Math.random().toString(36).substr(2, 9),
+            image: { file, url, width: img.width, height: img.height },
+          },
+        ]);
+      };
+      img.src = url;
+    });
+  };
+
+  const addSlot = () => {
+    setSlots((prev) => [...prev, { id: Math.random().toString(36).substr(2, 9), image: null }]);
+  };
+
+  const removeSlot = (id: string) => {
+    setSlots((prev) => prev.filter((s) => s.id !== id));
+  };
+
+  const clearSlotImage = (id: string) => {
+    setSlots((prev) => prev.map((s) => (s.id === id ? { ...s, image: null } : s)));
+  };
+
+  const onDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+  };
+
+  const onDropToSlot = (e: React.DragEvent, slotId: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+      handleSlotUpload(slotId, e.dataTransfer.files[0]);
+    }
+  };
+
+  const onDropBulk = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.dataTransfer.files) {
+      handleBulkUpload(e.dataTransfer.files);
+    }
+  };
+
+  const bgColors = {
+    "gray-black": "bg-[#141414]",
+    "brown-black": "bg-[#1a1414]",
+    "white": "bg-white",
+  };
+
+  const inkColors = {
+    "gray-black": "text-white",
+    "brown-black": "text-white",
+    "white": "text-black",
+  };
+
+  const [isDownloading, setIsDownloading] = useState(false);
+
+  const downloadFullGrid = async () => {
+    const filledSlots = slots.filter(s => s.image);
+    if (filledSlots.length === 0) return;
+    setIsDownloading(true);
+    const canvas = document.createElement("canvas");
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    // Layout logic: 2 columns
+    const width = 2400;
+    const gap = 40;
+    const padding = 60;
+    const colWidth = (width - padding * 2 - gap) / 2;
+    
+    // Calculate heights for two columns
+    let col1Height = padding;
+    let col2Height = padding;
+    
+    const imagePositions: { img: any; x: number; y: number; w: number; h: number; name: string }[] = [];
+
+    const loadImage = (url: string): Promise<HTMLImageElement> => {
+      return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => resolve(img);
+        img.onerror = reject;
+        img.src = url;
+      });
+    };
+
+    try {
+      for (const slot of filledSlots) {
+        if (!slot.image) continue;
+        const img = await loadImage(slot.image.url);
+        const h = (colWidth / slot.image.width) * slot.image.height;
+        
+        if (col1Height <= col2Height) {
+          imagePositions.push({ img, x: padding, y: col1Height, w: colWidth, h, name: slot.image.file.name });
+          col1Height += h + gap;
+        } else {
+          imagePositions.push({ img, x: padding + colWidth + gap, y: col2Height, w: colWidth, h, name: slot.image.file.name });
+          col2Height += h + gap;
+        }
+      }
+
+      const totalHeight = Math.max(col1Height, col2Height) + padding + (logo ? 200 : 0);
+      canvas.width = width;
+      canvas.height = totalHeight;
+
+      // 1. Draw Background
+      if (bgImage) {
+        const bgImg = await loadImage(bgImage.url);
+        // Draw background image with cover logic
+        const bgAspect = bgImg.width / bgImg.height;
+        const canvasAspect = width / totalHeight;
+        let sx, sy, sw, sh;
+        if (bgAspect > canvasAspect) {
+          sh = bgImg.height;
+          sw = bgImg.height * canvasAspect;
+          sx = (bgImg.width - sw) / 2;
+          sy = 0;
+        } else {
+          sw = bgImg.width;
+          sh = bgImg.width / canvasAspect;
+          sx = 0;
+          sy = (bgImg.height - sh) / 2;
+        }
+        ctx.drawImage(bgImg, sx, sy, sw, sh, 0, 0, width, totalHeight);
+        // Add a slight overlay to make images pop
+        ctx.fillStyle = "rgba(0, 0, 0, 0.2)";
+        ctx.fillRect(0, 0, width, totalHeight);
+      } else {
+        ctx.fillStyle = background === "white" ? "#ffffff" : background === "brown-black" ? "#1a1414" : "#141414";
+        ctx.fillRect(0, 0, width, totalHeight);
+      }
+
+      // 2. Draw Images
+      for (const pos of imagePositions) {
+        ctx.drawImage(pos.img, pos.x, pos.y, pos.w, pos.h);
+        
+        if (showImageNames) {
+          ctx.save();
+          ctx.font = "bold 32px sans-serif";
+          const textPadding = 24;
+          const textMetrics = ctx.measureText(pos.name.toUpperCase());
+          const bgWidth = textMetrics.width + textPadding * 2;
+          const bgHeight = 60;
+          
+          ctx.fillStyle = "rgba(0, 0, 0, 0.6)";
+          ctx.roundRect(pos.x + 20, pos.y + pos.h - 20 - bgHeight, bgWidth, bgHeight, 12);
+          ctx.fill();
+          
+          ctx.fillStyle = "white";
+          ctx.fillText(pos.name.toUpperCase(), pos.x + 20 + textPadding, pos.y + pos.h - 20 - bgHeight + 42);
+          ctx.restore();
+        }
+      }
+
+      // 3. Draw Logo
+      if (logo) {
+        const logoImg = await loadImage(logo.url);
+        const logoHeight = 120;
+        const logoWidth = (logoImg.width / logoImg.height) * logoHeight;
+        ctx.globalAlpha = 0.6;
+        ctx.drawImage(logoImg, (width - logoWidth) / 2, totalHeight - logoHeight - 60, logoWidth, logoHeight);
+        ctx.globalAlpha = 1.0;
+      }
+
+      // Download
+      const link = document.createElement("a");
+      link.href = canvas.toDataURL("image/png");
+      link.download = `grid-collage-${Date.now()}.png`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } catch (err) {
+      console.error("Error generating full grid image:", err);
+    } finally {
+      setIsDownloading(false);
+    }
+  };
+
+  return (
+    <div className={clsx("min-h-screen font-sans transition-colors duration-500", bgColors[background])}>
+      <div className="max-w-7xl mx-auto p-6 lg:p-12 grid grid-cols-1 lg:grid-cols-12 gap-12">
+        
+        {/* Sidebar Controls */}
+        <div className="lg:col-span-4 space-y-8">
+          <div className="space-y-2">
+            <h1 className={clsx("text-4xl font-bold tracking-tight", inkColors[background])}>
+              Grid Builder
+            </h1>
+            <p className="text-neutral-500 text-sm">
+              Manual layout with drag-and-drop cells.
+            </p>
+          </div>
+
+          <div className="flex gap-2">
+            <button
+              onClick={() => setSlots(slots.map(s => ({ ...s, image: null })))}
+              className="flex-1 py-3 rounded-2xl bg-red-500/10 text-red-400 border border-red-500/20 text-[10px] font-bold uppercase tracking-widest hover:bg-red-500/20 transition-all"
+            >
+              Clear All
+            </button>
+            <button
+              onClick={() => {
+                setLogo(null);
+                setBgImage(null);
+                setSlots([
+                  { id: "1", image: null },
+                  { id: "2", image: null },
+                  { id: "3", image: null },
+                ]);
+                setBackground("gray-black");
+                setShowImageNames(false);
+              }}
+              className="flex-1 py-3 rounded-2xl bg-neutral-800 text-neutral-400 border border-white/5 text-[10px] font-bold uppercase tracking-widest hover:bg-neutral-700 transition-all"
+            >
+              Reset All
+            </button>
+          </div>
+
+          <div className="space-y-6 bg-neutral-900/10 p-6 rounded-3xl border border-white/5 backdrop-blur-sm">
+            
+            {/* Background Selection */}
+            <div className="space-y-4">
+              <label className="text-xs font-bold text-neutral-500 uppercase tracking-widest flex items-center gap-2">
+                <Palette className="w-4 h-4" /> Background
+              </label>
+              <div className="grid grid-cols-3 gap-3">
+                {[
+                  { id: "gray-black", label: "Dark", color: "bg-[#141414]" },
+                  { id: "brown-black", label: "Warm", color: "bg-[#1a1414]" },
+                  { id: "white", label: "Light", color: "bg-white" }
+                ].map((bg) => (
+                  <button
+                    key={bg.id}
+                    onClick={() => { setBackground(bg.id as any); setBgImage(null); }}
+                    className={clsx(
+                      "group relative flex flex-col items-center gap-2 p-2 rounded-2xl border transition-all",
+                      background === bg.id && !bgImage
+                        ? "border-emerald-500 bg-emerald-500/5 shadow-lg shadow-emerald-500/10" 
+                        : "border-white/5 bg-neutral-900/20 hover:border-white/20"
+                    )}
+                  >
+                    <div className={clsx("w-full aspect-square rounded-xl border border-white/10", bg.color)} />
+                    <span className="text-[10px] font-bold uppercase tracking-tighter opacity-60 group-hover:opacity-100 transition-opacity">
+                      {bg.label}
+                    </span>
+                    {background === bg.id && !bgImage && (
+                      <CheckCircle2 className="absolute -top-1 -right-1 w-4 h-4 text-emerald-500 fill-neutral-950" />
+                    )}
+                  </button>
+                ))}
+              </div>
+
+              {/* Custom Background Image */}
+              <div 
+                onClick={() => bgImageInputRef.current?.click()}
+                className={clsx(
+                  "relative h-20 border-2 border-dashed rounded-2xl flex flex-col items-center justify-center cursor-pointer transition-all overflow-hidden group mt-2",
+                  bgImage ? "border-emerald-500/50 bg-emerald-500/5" : "border-white/10 hover:border-white/20"
+                )}
+              >
+                <input
+                  type="file"
+                  ref={bgImageInputRef}
+                  onChange={handleBgImageUpload}
+                  accept="image/*"
+                  className="hidden"
+                />
+                {bgImage ? (
+                  <>
+                    <img src={bgImage.url} className="w-full h-full object-cover opacity-40" alt="BG" />
+                    <div className="absolute inset-0 flex items-center justify-center">
+                      <span className="text-[10px] font-bold uppercase text-white drop-shadow-md">BG Image Active</span>
+                    </div>
+                    <button 
+                      onClick={(e) => { e.stopPropagation(); setBgImage(null); }}
+                      className="absolute top-2 right-2 p-1 bg-black/50 rounded-full text-white opacity-0 group-hover:opacity-100 transition-opacity"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <ImagePlus className="w-5 h-5 text-neutral-500 group-hover:text-emerald-500 transition-colors" />
+                    <span className="text-[10px] text-neutral-500 font-bold mt-1 uppercase">Custom BG Image</span>
+                  </>
+                )}
+              </div>
+            </div>
+
+            {/* Brand Logo */}
+            <div className="space-y-4">
+              <label className="text-xs font-bold text-neutral-500 uppercase tracking-widest flex items-center gap-2">
+                <ImageIcon className="w-4 h-4" /> Brand Logo
+              </label>
+              <div 
+                onClick={() => logoInputRef.current?.click()}
+                className={clsx(
+                  "relative h-24 border-2 border-dashed rounded-2xl flex flex-col items-center justify-center cursor-pointer transition-all overflow-hidden group",
+                  logo ? "border-emerald-500/50 bg-emerald-500/5" : "border-white/10 hover:border-white/20"
+                )}
+              >
+                <input
+                  type="file"
+                  ref={logoInputRef}
+                  onChange={handleLogoUpload}
+                  accept="image/*"
+                  className="hidden"
+                />
+                {logo ? (
+                  <>
+                    <img src={logo.url} className="h-16 object-contain" alt="Logo" />
+                    <button 
+                      onClick={(e) => { e.stopPropagation(); setLogo(null); }}
+                      className="absolute top-2 right-2 p-1 bg-black/50 rounded-full text-white opacity-0 group-hover:opacity-100 transition-opacity"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <Upload className="w-6 h-6 text-neutral-500 group-hover:text-emerald-500 transition-colors" />
+                    <span className="text-[10px] text-neutral-500 font-bold mt-2 uppercase">Upload Logo</span>
+                  </>
+                )}
+              </div>
+            </div>
+
+            {/* Toggle Name */}
+            <div className="flex items-center justify-between p-4 bg-neutral-900/20 rounded-2xl border border-white/5">
+              <div className="flex items-center gap-3">
+                <Type className="w-4 h-4 text-neutral-500" />
+                <span className="text-xs font-bold text-neutral-400 uppercase tracking-wider">Show Image Names</span>
+              </div>
+              <button
+                onClick={() => setShowImageNames(!showImageNames)}
+                className={clsx(
+                  "w-12 h-6 rounded-full transition-all relative",
+                  showImageNames ? "bg-emerald-500" : "bg-neutral-800"
+                )}
+              >
+                <div className={clsx(
+                  "absolute top-1 w-4 h-4 rounded-full bg-white transition-all",
+                  showImageNames ? "left-7" : "left-1"
+                )} />
+              </button>
+            </div>
+          </div>
+
+          {/* Download Button */}
+          <button
+            onClick={downloadFullGrid}
+            disabled={slots.every(s => !s.image) || isDownloading}
+            className={clsx(
+              "w-full py-5 rounded-3xl font-bold text-sm tracking-widest transition-all flex items-center justify-center gap-3 uppercase shadow-2xl",
+              (slots.every(s => !s.image) || isDownloading)
+                ? "bg-neutral-800 text-neutral-600 cursor-not-allowed"
+                : "bg-emerald-500 text-black hover:scale-[1.02] active:scale-95 shadow-emerald-500/20"
+            )}
+          >
+            {isDownloading ? (
+              <>
+                <div className="w-5 h-5 border-2 border-black/20 border-t-black rounded-full animate-spin" />
+                Đang xử lý...
+              </>
+            ) : (
+              <>
+                <Download className="w-5 h-5" />
+                Tải về toàn bộ (Download Grid)
+              </>
+            )}
+          </button>
+        </div>
+
+        {/* Grid Canvas */}
+        <div className="lg:col-span-8 space-y-6">
+          {/* Bulk Upload Area */}
+          <div 
+            className="w-full h-32 rounded-3xl border-2 border-dashed border-emerald-500/20 bg-emerald-500/5 flex flex-col items-center justify-center cursor-pointer hover:bg-emerald-500/10 transition-all group"
+            onClick={() => bulkInputRef.current?.click()}
+            onDragOver={onDragOver}
+            onDrop={onDropBulk}
+          >
+            <input
+              type="file"
+              ref={bulkInputRef}
+              onChange={(e) => handleBulkUpload(e.target.files)}
+              accept="image/*"
+              multiple
+              className="hidden"
+            />
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-emerald-500 rounded-full text-black">
+                <Plus className="w-5 h-5" />
+              </div>
+              <div className="text-left">
+                <span className="block text-sm font-bold text-emerald-500 uppercase tracking-widest">Tải lên nhiều ảnh (Bulk Upload)</span>
+                <span className="block text-[10px] text-emerald-500/60 font-medium uppercase">Kéo thả hoặc click để thêm nhiều ảnh cùng lúc</span>
+              </div>
+            </div>
+          </div>
+
+          <div 
+            className="min-h-[600px] w-full rounded-3xl border-2 border-dashed border-white/10 bg-neutral-900/20 p-8 flex flex-col items-center justify-start gap-8 relative overflow-hidden"
+          >
+            {/* Background Image Preview in Editor */}
+            {bgImage && (
+              <div className="absolute inset-0 z-0 opacity-20">
+                <img src={bgImage.url} className="w-full h-full object-cover" alt="Editor BG" />
+              </div>
+            )}
+
+            <div className="w-full grid grid-cols-1 md:grid-cols-2 gap-8 relative z-10">
+              {slots.map((slot) => (
+                <div 
+                  key={slot.id} 
+                  className={clsx(
+                    "relative group rounded-3xl overflow-hidden border-2 border-dashed transition-all duration-300",
+                    slot.image 
+                      ? "border-white/10 bg-black/40 shadow-2xl" 
+                      : "border-white/5 bg-neutral-900/40 hover:border-emerald-500/30 hover:bg-emerald-500/5 min-h-[200px]"
+                  )}
+                  onDragOver={onDragOver}
+                  onDrop={(e) => onDropToSlot(e, slot.id)}
+                  style={{
+                    height: slot.image ? 'auto' : undefined,
+                    aspectRatio: slot.image ? `${slot.image.width} / ${slot.image.height}` : undefined
+                  }}
+                >
+                  <input
+                    type="file"
+                    ref={(el) => (slotInputRefs.current[slot.id] = el)}
+                    onChange={(e) => e.target.files?.[0] && handleSlotUpload(slot.id, e.target.files[0])}
+                    accept="image/*"
+                    className="hidden"
+                  />
+                  
+                  {slot.image ? (
+                    <div className="w-full h-full relative">
+                      <img 
+                        src={slot.image.url} 
+                        className="w-full h-full object-contain" 
+                        alt={slot.image.file.name} 
+                      />
+                      {showImageNames && (
+                        <div className="absolute bottom-4 left-4 px-3 py-1.5 bg-black/60 backdrop-blur-md rounded-xl text-[10px] font-bold text-white uppercase tracking-widest border border-white/10">
+                          {slot.image.file.name}
+                        </div>
+                      )}
+                      <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-4">
+                        <button 
+                          title="Set as Background"
+                          onClick={() => setBgImage(slot.image)}
+                          className="p-3 bg-emerald-500 text-black rounded-full hover:scale-110 transition-transform shadow-lg"
+                        >
+                          <ImageIcon className="w-5 h-5" />
+                        </button>
+                        <button 
+                          onClick={() => {
+                            const link = document.createElement("a");
+                            link.href = slot.image!.url;
+                            link.download = slot.image!.file.name;
+                            link.click();
+                          }} 
+                          className="p-3 bg-white text-black rounded-full hover:scale-110 transition-transform shadow-lg"
+                        >
+                          <Download className="w-5 h-5" />
+                        </button>
+                        <button onClick={() => clearSlotImage(slot.id)} className="p-3 bg-red-500 text-white rounded-full hover:scale-110 transition-transform shadow-lg">
+                          <Trash2 className="w-5 h-5" />
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div 
+                      className="w-full h-full flex flex-col items-center justify-center cursor-pointer p-8"
+                      onClick={() => slotInputRefs.current[slot.id]?.click()}
+                    >
+                      <Upload className="w-10 h-10 text-neutral-600 mb-3 group-hover:text-emerald-500 transition-colors" />
+                      <span className="text-[10px] font-bold text-neutral-600 uppercase tracking-widest group-hover:text-neutral-400 transition-colors">
+                        Upload to Slot
+                      </span>
+                      <button 
+                        onClick={(e) => { e.stopPropagation(); removeSlot(slot.id); }}
+                        className="absolute top-4 right-4 p-2 text-neutral-700 hover:text-red-400 transition-colors"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ))}
+
+              {/* Add New Slot Button */}
+              <button 
+                onClick={addSlot}
+                className="aspect-video rounded-3xl border-2 border-dashed border-white/5 bg-neutral-900/20 flex flex-col items-center justify-center gap-3 hover:bg-emerald-500/5 hover:border-emerald-500/20 transition-all group"
+              >
+                <Plus className="w-8 h-8 text-neutral-700 group-hover:text-emerald-500 transition-colors" />
+                <span className="text-[10px] font-bold text-neutral-700 uppercase tracking-widest group-hover:text-neutral-400">
+                  Add New Slot
+                </span>
+              </button>
+            </div>
+          </div>
+
+          {/* Logo Overlay on Canvas */}
+          {logo && (
+            <div className="mt-8 flex justify-center">
+              <img src={logo.url} className="h-12 object-contain opacity-50 hover:opacity-100 transition-opacity" alt="Brand Logo" />
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
