@@ -389,20 +389,48 @@ export default function CollageGenerator() {
         
         if (showImageNames) {
           ctx.save();
-          ctx.font = "bold 32px sans-serif";
-          const textPadding = 24;
-          const cleanName = pos.name.replace(/\.[^/.]+$/, "");
-          const textMetrics = ctx.measureText(cleanName.toUpperCase());
-          const bgWidth = textMetrics.width + textPadding * 2;
-          const bgHeight = 60;
+          const cleanName = pos.name.replace(/\.[^/.]+$/, "").toUpperCase();
+          
+          // Font settings - optimized for high-res canvas (2400px width)
+          ctx.font = "bold 38px sans-serif";
+          ctx.textBaseline = "middle";
+          
+          const textMetrics = ctx.measureText(cleanName);
+          const textPaddingH = 32;
+          const bgWidth = textMetrics.width + textPaddingH * 2;
+          const bgHeight = 72;
           
           const isDark = background !== "white";
-          ctx.fillStyle = isDark ? "rgba(0, 0, 0, 0.7)" : "rgba(255, 255, 255, 0.9)";
-          ctx.roundRect(pos.x + 20, pos.y + pos.h - 20 - bgHeight, bgWidth, bgHeight, 12);
+          
+          // Position label at bottom-left of the image
+          const labelX = pos.x + 30;
+          const labelY = pos.y + pos.h - 30 - bgHeight;
+          
+          // Draw background box (matching preview's glass effect)
+          ctx.fillStyle = isDark ? "rgba(0, 0, 0, 0.65)" : "rgba(255, 255, 255, 0.85)";
+          
+          const r = 16; // Corner radius
+          ctx.beginPath();
+          ctx.moveTo(labelX + r, labelY);
+          ctx.lineTo(labelX + bgWidth - r, labelY);
+          ctx.quadraticCurveTo(labelX + bgWidth, labelY, labelX + bgWidth, labelY + r);
+          ctx.lineTo(labelX + bgWidth, labelY + bgHeight - r);
+          ctx.quadraticCurveTo(labelX + bgWidth, labelY + bgHeight, labelX + bgWidth - r, labelY + bgHeight);
+          ctx.lineTo(labelX + r, labelY + bgHeight);
+          ctx.quadraticCurveTo(labelX, labelY + bgHeight, labelX, labelY + bgHeight - r);
+          ctx.lineTo(labelX, labelY + r);
+          ctx.quadraticCurveTo(labelX, labelY, labelX + r, labelY);
+          ctx.closePath();
           ctx.fill();
           
-          ctx.fillStyle = isDark ? "white" : "black";
-          ctx.fillText(cleanName.toUpperCase(), pos.x + 20 + textPadding, pos.y + pos.h - 20 - bgHeight + 42);
+          // Draw subtle border (matching preview's border-white/10)
+          ctx.strokeStyle = isDark ? "rgba(255, 255, 255, 0.15)" : "rgba(0, 0, 0, 0.1)";
+          ctx.lineWidth = 2;
+          ctx.stroke();
+          
+          // Draw text with high contrast
+          ctx.fillStyle = isDark ? "#FFFFFF" : "#000000";
+          ctx.fillText(cleanName, labelX + textPaddingH, labelY + bgHeight / 2 + 3);
           ctx.restore();
         }
       }
