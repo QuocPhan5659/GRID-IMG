@@ -1,7 +1,24 @@
 import React, { useState, useRef } from "react";
 import { motion, AnimatePresence } from "motion/react";
-import { Upload, Download, X, Palette, Type, Image as ImageIcon, CheckCircle2, Trash2, Plus, ImagePlus } from "lucide-react";
+import { Upload, Download, X, Palette, Type, Image as ImageIcon, CheckCircle2, Trash2, Plus, ImagePlus, GripVertical } from "lucide-react";
 import clsx from "clsx";
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  DragEndEvent,
+} from '@dnd-kit/core';
+import {
+  arrayMove,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  verticalListSortingStrategy,
+  useSortable,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 
 interface ImageInfo {
   file: File;
@@ -13,6 +30,130 @@ interface ImageInfo {
 interface GridSlot {
   id: string;
   image: ImageInfo | null;
+}
+
+function SortableSlot({ 
+  slot, 
+  onDragOver, 
+  onDropToSlot, 
+  handleSlotUpload, 
+  setBgImage, 
+  clearSlotImage, 
+  removeSlot, 
+  showImageNames, 
+  isDarkBg, 
+  slotInputRefs 
+}: { 
+  slot: GridSlot; 
+  onDragOver: any; 
+  onDropToSlot: any; 
+  handleSlotUpload: any; 
+  setBgImage: any; 
+  clearSlotImage: any; 
+  removeSlot: any; 
+  showImageNames: boolean; 
+  isDarkBg: boolean; 
+  slotInputRefs: any;
+  key?: string;
+}) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging
+  } = useSortable({ id: slot.id });
+
+  const style = {
+    transform: CSS.Translate.toString(transform),
+    transition: isDragging ? 'none' : transition,
+    zIndex: isDragging ? 50 : undefined,
+    opacity: isDragging ? 0.8 : 1,
+    touchAction: 'none',
+  };
+
+  const cleanName = slot.image ? slot.image.file.name.replace(/\.[^/.]+$/, "") : "";
+
+  return (
+    <div 
+      ref={setNodeRef}
+      style={style}
+      {...attributes}
+      {...listeners}
+      className={clsx(
+        "relative group rounded-2xl overflow-hidden border-2 border-dashed transition-all duration-200 cursor-grab active:cursor-grabbing",
+        slot.image 
+          ? "border-white/10 bg-black/40 shadow-xl" 
+          : "border-white/5 bg-neutral-900/40 hover:border-emerald-500/30 hover:bg-emerald-500/5 min-h-[120px]"
+      )}
+      onDragOver={onDragOver}
+      onDrop={(e) => onDropToSlot(e, slot.id)}
+    >
+      <input
+        type="file"
+        ref={(el) => (slotInputRefs.current[slot.id] = el)}
+        onChange={(e) => e.target.files?.[0] && handleSlotUpload(slot.id, e.target.files[0])}
+        accept="image/*"
+        className="hidden"
+      />
+      
+      {slot.image ? (
+        <div className="w-full h-full relative">
+          <img 
+            src={slot.image.url} 
+            className="w-full h-full object-contain pointer-events-none select-none" 
+            alt={slot.image.file.name} 
+            style={{
+              aspectRatio: `${slot.image.width} / ${slot.image.height}`
+            }}
+          />
+          {showImageNames && (
+            <div className={clsx(
+              "absolute bottom-3 left-3 px-2 py-1 backdrop-blur-md rounded-lg text-[9px] font-bold uppercase tracking-widest border border-white/10 pointer-events-none",
+              isDarkBg ? "bg-black/60 text-white" : "bg-white/80 text-black"
+            )}>
+              {cleanName}
+            </div>
+          )}
+          <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
+            <button 
+              title="Set as Background"
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => { e.stopPropagation(); setBgImage(slot.image); }}
+              className="p-2 bg-emerald-500 text-black rounded-full hover:scale-110 transition-transform shadow-lg"
+            >
+              <ImageIcon className="w-4 h-4" />
+            </button>
+            <button 
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => { e.stopPropagation(); clearSlotImage(slot.id); }} 
+              className="p-2 bg-red-500 text-white rounded-full hover:scale-110 transition-transform shadow-lg"
+            >
+              <Trash2 className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div 
+          className="w-full h-full flex flex-col items-center justify-center cursor-pointer p-4"
+          onClick={() => slotInputRefs.current[slot.id]?.click()}
+        >
+          <Upload className="w-6 h-6 text-neutral-600 mb-2 group-hover:text-emerald-500 transition-colors pointer-events-none" />
+          <span className="text-[8px] font-bold text-neutral-600 uppercase tracking-widest group-hover:text-neutral-400 transition-colors pointer-events-none">
+            Upload
+          </span>
+          <button 
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={(e) => { e.stopPropagation(); removeSlot(slot.id); }}
+            className="absolute top-2 right-2 p-1 text-neutral-700 hover:text-red-400 transition-colors"
+          >
+            <X className="w-3 h-3" />
+          </button>
+        </div>
+      )}
+    </div>
+  );
 }
 
 export default function CollageGenerator() {
@@ -68,17 +209,29 @@ export default function CollageGenerator() {
   const handleBulkUpload = (files: FileList | null) => {
     if (!files) return;
     const filesArray = Array.from(files);
+    
     filesArray.forEach((file) => {
       const url = URL.createObjectURL(file);
       const img = new Image();
       img.onload = () => {
-        setSlots((prev) => [
-          ...prev,
-          {
-            id: Math.random().toString(36).substr(2, 9),
-            image: { file, url, width: img.width, height: img.height },
-          },
-        ]);
+        setSlots((prev) => {
+          const emptySlotIndex = prev.findIndex(s => !s.image);
+          if (emptySlotIndex !== -1) {
+            const newSlots = [...prev];
+            newSlots[emptySlotIndex] = {
+              ...newSlots[emptySlotIndex],
+              image: { file, url, width: img.width, height: img.height }
+            };
+            return newSlots;
+          }
+          return [
+            ...prev,
+            {
+              id: Math.random().toString(36).substr(2, 9),
+              image: { file, url, width: img.width, height: img.height },
+            },
+          ];
+        });
       };
       img.src = url;
     });
@@ -130,6 +283,30 @@ export default function CollageGenerator() {
   };
 
   const [isDownloading, setIsDownloading] = useState(false);
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: {
+        distance: 8,
+      },
+    }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    })
+  );
+
+  const handleDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+
+    if (active.id !== over?.id) {
+      setSlots((items) => {
+        const oldIndex = items.findIndex((i) => i.id === active.id);
+        const newIndex = items.findIndex((i) => i.id === over?.id);
+
+        return arrayMove(items, oldIndex, newIndex);
+      });
+    }
+  };
 
   const downloadFullGrid = async () => {
     const filledSlots = slots.filter(s => s.image);
@@ -214,16 +391,18 @@ export default function CollageGenerator() {
           ctx.save();
           ctx.font = "bold 32px sans-serif";
           const textPadding = 24;
-          const textMetrics = ctx.measureText(pos.name.toUpperCase());
+          const cleanName = pos.name.replace(/\.[^/.]+$/, "");
+          const textMetrics = ctx.measureText(cleanName.toUpperCase());
           const bgWidth = textMetrics.width + textPadding * 2;
           const bgHeight = 60;
           
-          ctx.fillStyle = "rgba(0, 0, 0, 0.6)";
+          const isDark = background !== "white";
+          ctx.fillStyle = isDark ? "rgba(0, 0, 0, 0.7)" : "rgba(255, 255, 255, 0.9)";
           ctx.roundRect(pos.x + 20, pos.y + pos.h - 20 - bgHeight, bgWidth, bgHeight, 12);
           ctx.fill();
           
-          ctx.fillStyle = "white";
-          ctx.fillText(pos.name.toUpperCase(), pos.x + 20 + textPadding, pos.y + pos.h - 20 - bgHeight + 42);
+          ctx.fillStyle = isDark ? "white" : "black";
+          ctx.fillText(cleanName.toUpperCase(), pos.x + 20 + textPadding, pos.y + pos.h - 20 - bgHeight + 42);
           ctx.restore();
         }
       }
@@ -251,6 +430,43 @@ export default function CollageGenerator() {
       setIsDownloading(false);
     }
   };
+
+  const isDarkBg = background !== "white";
+
+  // Masonry layout logic for preview
+  const col1Slots: GridSlot[] = [];
+  const col2Slots: GridSlot[] = [];
+  let h1 = 0;
+  let h2 = 0;
+
+  slots.forEach((slot) => {
+    const aspect = slot.image ? slot.image.width / slot.image.height : 1.5;
+    const relativeHeight = 1 / aspect;
+
+    if (h1 <= h2) {
+      col1Slots.push(slot);
+      h1 += relativeHeight;
+    } else {
+      col2Slots.push(slot);
+      h2 += relativeHeight;
+    }
+  });
+
+  const renderSlot = (slot: GridSlot) => (
+    <SortableSlot 
+      key={slot.id} 
+      slot={slot} 
+      onDragOver={onDragOver}
+      onDropToSlot={onDropToSlot}
+      handleSlotUpload={handleSlotUpload}
+      setBgImage={setBgImage}
+      clearSlotImage={clearSlotImage}
+      removeSlot={removeSlot}
+      showImageNames={showImageNames}
+      isDarkBg={isDarkBg}
+      slotInputRefs={slotInputRefs}
+    />
+  );
 
   return (
     <div className={clsx("min-h-screen font-sans transition-colors duration-500", bgColors[background])}>
@@ -485,98 +701,36 @@ export default function CollageGenerator() {
               </div>
             )}
 
-            <div className="w-full grid grid-cols-1 md:grid-cols-2 gap-8 relative z-10">
-              {slots.map((slot) => (
-                <div 
-                  key={slot.id} 
-                  className={clsx(
-                    "relative group rounded-3xl overflow-hidden border-2 border-dashed transition-all duration-300",
-                    slot.image 
-                      ? "border-white/10 bg-black/40 shadow-2xl" 
-                      : "border-white/5 bg-neutral-900/40 hover:border-emerald-500/30 hover:bg-emerald-500/5 min-h-[200px]"
-                  )}
-                  onDragOver={onDragOver}
-                  onDrop={(e) => onDropToSlot(e, slot.id)}
-                  style={{
-                    height: slot.image ? 'auto' : undefined,
-                    aspectRatio: slot.image ? `${slot.image.width} / ${slot.image.height}` : undefined
-                  }}
-                >
-                  <input
-                    type="file"
-                    ref={(el) => (slotInputRefs.current[slot.id] = el)}
-                    onChange={(e) => e.target.files?.[0] && handleSlotUpload(slot.id, e.target.files[0])}
-                    accept="image/*"
-                    className="hidden"
-                  />
-                  
-                  {slot.image ? (
-                    <div className="w-full h-full relative">
-                      <img 
-                        src={slot.image.url} 
-                        className="w-full h-full object-contain" 
-                        alt={slot.image.file.name} 
-                      />
-                      {showImageNames && (
-                        <div className="absolute bottom-4 left-4 px-3 py-1.5 bg-black/60 backdrop-blur-md rounded-xl text-[10px] font-bold text-white uppercase tracking-widest border border-white/10">
-                          {slot.image.file.name}
-                        </div>
-                      )}
-                      <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-4">
-                        <button 
-                          title="Set as Background"
-                          onClick={() => setBgImage(slot.image)}
-                          className="p-3 bg-emerald-500 text-black rounded-full hover:scale-110 transition-transform shadow-lg"
-                        >
-                          <ImageIcon className="w-5 h-5" />
-                        </button>
-                        <button 
-                          onClick={() => {
-                            const link = document.createElement("a");
-                            link.href = slot.image!.url;
-                            link.download = slot.image!.file.name;
-                            link.click();
-                          }} 
-                          className="p-3 bg-white text-black rounded-full hover:scale-110 transition-transform shadow-lg"
-                        >
-                          <Download className="w-5 h-5" />
-                        </button>
-                        <button onClick={() => clearSlotImage(slot.id)} className="p-3 bg-red-500 text-white rounded-full hover:scale-110 transition-transform shadow-lg">
-                          <Trash2 className="w-5 h-5" />
-                        </button>
-                      </div>
-                    </div>
-                  ) : (
-                    <div 
-                      className="w-full h-full flex flex-col items-center justify-center cursor-pointer p-8"
-                      onClick={() => slotInputRefs.current[slot.id]?.click()}
-                    >
-                      <Upload className="w-10 h-10 text-neutral-600 mb-3 group-hover:text-emerald-500 transition-colors" />
-                      <span className="text-[10px] font-bold text-neutral-600 uppercase tracking-widest group-hover:text-neutral-400 transition-colors">
-                        Upload to Slot
-                      </span>
-                      <button 
-                        onClick={(e) => { e.stopPropagation(); removeSlot(slot.id); }}
-                        className="absolute top-4 right-4 p-2 text-neutral-700 hover:text-red-400 transition-colors"
-                      >
-                        <X className="w-4 h-4" />
-                      </button>
-                    </div>
-                  )}
-                </div>
-              ))}
-
-              {/* Add New Slot Button */}
-              <button 
-                onClick={addSlot}
-                className="aspect-video rounded-3xl border-2 border-dashed border-white/5 bg-neutral-900/20 flex flex-col items-center justify-center gap-3 hover:bg-emerald-500/5 hover:border-emerald-500/20 transition-all group"
+            <DndContext 
+              sensors={sensors}
+              collisionDetection={closestCenter}
+              onDragEnd={handleDragEnd}
+            >
+              <SortableContext 
+                items={slots.map(s => s.id)}
+                strategy={verticalListSortingStrategy}
               >
-                <Plus className="w-8 h-8 text-neutral-700 group-hover:text-emerald-500 transition-colors" />
-                <span className="text-[10px] font-bold text-neutral-700 uppercase tracking-widest group-hover:text-neutral-400">
-                  Add New Slot
-                </span>
-              </button>
-            </div>
+                <div className="w-full grid grid-cols-2 gap-4 relative z-10 max-w-4xl">
+                  <div className="flex flex-col gap-4">
+                    {col1Slots.map(renderSlot)}
+                  </div>
+                  <div className="flex flex-col gap-4">
+                    {col2Slots.map(renderSlot)}
+                  </div>
+                </div>
+              </SortableContext>
+            </DndContext>
+
+            {/* Add New Slot Button */}
+            <button 
+              onClick={addSlot}
+              className="w-full max-w-4xl h-16 rounded-2xl border-2 border-dashed border-white/5 bg-neutral-900/20 flex items-center justify-center gap-3 hover:bg-emerald-500/5 hover:border-emerald-500/20 transition-all group relative z-10"
+            >
+              <Plus className="w-5 h-5 text-neutral-700 group-hover:text-emerald-500 transition-colors" />
+              <span className="text-[10px] font-bold text-neutral-700 uppercase tracking-widest group-hover:text-neutral-400">
+                Add New Slot
+              </span>
+            </button>
           </div>
 
           {/* Logo Overlay on Canvas */}
