@@ -1,6 +1,6 @@
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "motion/react";
-import { Upload, Download, X, Palette, Type, Image as ImageIcon, CheckCircle2, Trash2, Plus, ImagePlus, GripVertical } from "lucide-react";
+import { Upload, Download, X, Palette, Type, Image as ImageIcon, CheckCircle2, Trash2, Plus, ImagePlus, GripVertical, RotateCw, Pencil } from "lucide-react";
 import clsx from "clsx";
 import {
   DndContext,
@@ -15,7 +15,7 @@ import {
   arrayMove,
   SortableContext,
   sortableKeyboardCoordinates,
-  verticalListSortingStrategy,
+  rectSortingStrategy,
   useSortable,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
@@ -25,6 +25,8 @@ interface ImageInfo {
   url: string;
   width: number;
   height: number;
+  displayName: string;
+  rotation: number;
 }
 
 interface GridSlot {
@@ -42,7 +44,9 @@ function SortableSlot({
   removeSlot, 
   showImageNames, 
   isDarkBg, 
-  slotInputRefs 
+  slotInputRefs,
+  onRenameSlot,
+  onRotateSlot
 }: { 
   slot: GridSlot; 
   onDragOver: any; 
@@ -54,6 +58,8 @@ function SortableSlot({
   showImageNames: boolean; 
   isDarkBg: boolean; 
   slotInputRefs: any;
+  onRenameSlot: (id: string, name: string) => void;
+  onRotateSlot: (id: string) => void;
   key?: string;
 }) {
   const {
@@ -73,7 +79,18 @@ function SortableSlot({
     touchAction: 'none',
   };
 
-  const cleanName = slot.image ? slot.image.file.name.replace(/\.[^/.]+$/, "") : "";
+  const cleanName = slot.image ? slot.image.displayName : "";
+  const [isRenaming, setIsRenaming] = useState(false);
+  const [newName, setNewName] = useState(slot.image?.displayName || "");
+
+  useEffect(() => {
+    setNewName(slot.image?.displayName || "");
+  }, [slot.image?.displayName]);
+
+  const handleRenameSubmit = () => {
+    onRenameSlot(slot.id, newName.toUpperCase());
+    setIsRenaming(false);
+  };
 
   return (
     <div 
@@ -85,7 +102,7 @@ function SortableSlot({
         "relative group rounded-2xl overflow-hidden border-2 border-dashed transition-all duration-200 cursor-grab active:cursor-grabbing",
         slot.image 
           ? "border-white/10 bg-black/40 shadow-xl" 
-          : "border-white/5 bg-neutral-900/40 hover:border-emerald-500/30 hover:bg-emerald-500/5 min-h-[120px]"
+          : "border-emerald-500/30 bg-emerald-500/5 hover:border-emerald-500/50 hover:bg-emerald-500/10 min-h-[120px]"
       )}
       onDragOver={onDragOver}
       onDrop={(e) => onDropToSlot(e, slot.id)}
@@ -105,25 +122,49 @@ function SortableSlot({
             className="w-full h-full object-contain pointer-events-none select-none" 
             alt={slot.image.file.name} 
             style={{
-              aspectRatio: `${slot.image.width} / ${slot.image.height}`
+              aspectRatio: slot.image.rotation % 180 === 0 
+                ? `${slot.image.width} / ${slot.image.height}` 
+                : `${slot.image.height} / ${slot.image.width}`,
+              transform: `rotate(${slot.image.rotation}deg)`,
+              transition: 'transform 0.3s ease-in-out, aspect-ratio 0.3s ease-in-out'
             }}
           />
           {showImageNames && (
-            <div className={clsx(
-              "absolute bottom-3 left-3 px-2 py-1 backdrop-blur-md rounded-lg text-[9px] font-bold uppercase tracking-widest border border-white/10 pointer-events-none",
-              isDarkBg ? "bg-black/60 text-white" : "bg-white/80 text-black"
-            )}>
-              {cleanName}
+            <div 
+              className={clsx(
+                "absolute bottom-3 left-3 px-3 py-1.5 backdrop-blur-md rounded-lg text-sm font-bold uppercase tracking-widest border border-white/10 pointer-events-auto cursor-pointer flex items-center gap-2 z-20",
+                isDarkBg ? "bg-black/60 text-white" : "bg-white/80 text-black"
+              )}
+            >
+              {isRenaming ? (
+                <input 
+                  value={newName}
+                  onChange={(e) => setNewName(e.target.value)}
+                  onBlur={handleRenameSubmit}
+                  onKeyDown={(e) => { 
+                    if (e.key === 'Enter') handleRenameSubmit();
+                    if (e.key === ' ') e.stopPropagation();
+                  }}
+                  className={clsx("bg-transparent w-full outline-none", isDarkBg ? "text-white" : "text-black")}
+                  autoFocus
+                  onClick={(e) => e.stopPropagation()}
+                />
+              ) : (
+                <>
+                  <span onDoubleClick={(e) => { e.stopPropagation(); setIsRenaming(true); }}>{cleanName}</span>
+                  <Pencil className="w-3 h-3 cursor-pointer hover:text-emerald-500" onClick={(e) => { e.stopPropagation(); setIsRenaming(true); }} />
+                </>
+              )}
             </div>
           )}
           <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
             <button 
-              title="Set as Background"
+              title="Rotate 90°"
               onPointerDown={(e) => e.stopPropagation()}
-              onClick={(e) => { e.stopPropagation(); setBgImage(slot.image); }}
-              className="p-2 bg-emerald-500 text-black rounded-full hover:scale-110 transition-transform shadow-lg"
+              onClick={(e) => { e.stopPropagation(); onRotateSlot(slot.id); }}
+              className="p-2 bg-blue-500 text-white rounded-full hover:scale-110 transition-transform shadow-lg"
             >
-              <ImageIcon className="w-4 h-4" />
+              <RotateCw className="w-4 h-4" />
             </button>
             <button 
               onPointerDown={(e) => e.stopPropagation()}
@@ -172,12 +213,29 @@ export default function CollageGenerator() {
   const bulkInputRef = useRef<HTMLInputElement>(null);
   const slotInputRefs = useRef<{ [key: string]: HTMLInputElement | null }>({});
 
-  const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      const file = e.target.files[0];
-      setLogo({ file, url: URL.createObjectURL(file) });
-    }
-  };
+  React.useEffect(() => {
+    const handlePaste = (e: ClipboardEvent) => {
+      const items = e.clipboardData?.items;
+      if (!items) return;
+
+      for (let i = 0; i < items.length; i++) {
+        if (items[i].type.indexOf("image") !== -1) {
+          const file = items[i].getAsFile();
+          if (file) {
+            const emptySlot = slots.find(s => !s.image);
+            const slotId = emptySlot ? emptySlot.id : Math.random().toString(36).substr(2, 9);
+            if (!emptySlot) {
+              setSlots(prev => [...prev, { id: slotId, image: null }]);
+            }
+            handleSlotUpload(slotId, file, "Pasted Image");
+          }
+        }
+      }
+    };
+
+    window.addEventListener("paste", handlePaste);
+    return () => window.removeEventListener("paste", handlePaste);
+  }, [slots]);
 
   const handleBgImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
@@ -191,17 +249,31 @@ export default function CollageGenerator() {
     }
   };
 
-  const handleSlotUpload = (slotId: string, file: File) => {
+  const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      const file = e.target.files[0];
+      const url = URL.createObjectURL(file);
+      setLogo({ file, url });
+    }
+  };
+
+  const handleSlotUpload = (slotId: string, file: File, displayName?: string) => {
     const url = URL.createObjectURL(file);
     const img = new Image();
     img.onload = () => {
-      setSlots((prev) =>
-        prev.map((s) =>
+      setSlots((prev) => {
+        const updatedSlots = prev.map((s) =>
           s.id === slotId
-            ? { ...s, image: { file, url, width: img.width, height: img.height } }
+            ? { ...s, image: { file, url, width: img.width, height: img.height, rotation: 0, displayName: displayName || file.name.replace(/\.[^/.]+$/, "").toUpperCase() } }
             : s
-        )
-      );
+        );
+        
+        // Auto-create new slot if all slots are filled
+        if (updatedSlots.every(s => s.image)) {
+          updatedSlots.push({ id: Math.random().toString(36).substr(2, 9), image: null });
+        }
+        return updatedSlots;
+      });
     };
     img.src = url;
   };
@@ -220,7 +292,7 @@ export default function CollageGenerator() {
             const newSlots = [...prev];
             newSlots[emptySlotIndex] = {
               ...newSlots[emptySlotIndex],
-              image: { file, url, width: img.width, height: img.height }
+              image: { file, url, width: img.width, height: img.height, rotation: 0, displayName: file.name.replace(/\.[^/.]+$/, "").toUpperCase() }
             };
             return newSlots;
           }
@@ -228,7 +300,7 @@ export default function CollageGenerator() {
             ...prev,
             {
               id: Math.random().toString(36).substr(2, 9),
-              image: { file, url, width: img.width, height: img.height },
+              image: { file, url, width: img.width, height: img.height, rotation: 0, displayName: file.name.replace(/\.[^/.]+$/, "").toUpperCase() },
             },
           ];
         });
@@ -243,6 +315,14 @@ export default function CollageGenerator() {
 
   const removeSlot = (id: string) => {
     setSlots((prev) => prev.filter((s) => s.id !== id));
+  };
+
+  const rotateSlotImage = (id: string) => {
+    setSlots((prev) => prev.map((s) => (s.id === id && s.image ? { ...s, image: { ...s.image, rotation: (s.image.rotation + 90) % 360 } } : s)));
+  };
+
+  const renameSlotImage = (id: string, name: string) => {
+    setSlots((prev) => prev.map((s) => (s.id === id && s.image ? { ...s, image: { ...s.image, displayName: name.toUpperCase() } } : s)));
   };
 
   const clearSlotImage = (id: string) => {
@@ -287,7 +367,7 @@ export default function CollageGenerator() {
   const sensors = useSensors(
     useSensor(PointerSensor, {
       activationConstraint: {
-        distance: 8,
+        distance: 1,
       },
     }),
     useSensor(KeyboardSensor, {
@@ -326,7 +406,7 @@ export default function CollageGenerator() {
     let col1Height = padding;
     let col2Height = padding;
     
-    const imagePositions: { img: any; x: number; y: number; w: number; h: number; name: string }[] = [];
+    const imagePositions: { img: any; x: number; y: number; w: number; h: number; name: string; rotation: number }[] = [];
 
     const loadImage = (url: string): Promise<HTMLImageElement> => {
       return new Promise((resolve, reject) => {
@@ -341,13 +421,19 @@ export default function CollageGenerator() {
       for (const slot of filledSlots) {
         if (!slot.image) continue;
         const img = await loadImage(slot.image.url);
-        const h = (colWidth / slot.image.width) * slot.image.height;
+        
+        // Swap dimensions if rotated 90 or 270
+        const isRotated = slot.image.rotation % 180 !== 0;
+        const imgW = isRotated ? slot.image.height : slot.image.width;
+        const imgH = isRotated ? slot.image.width : slot.image.height;
+        
+        const h = (colWidth / imgW) * imgH;
         
         if (col1Height <= col2Height) {
-          imagePositions.push({ img, x: padding, y: col1Height, w: colWidth, h, name: slot.image.file.name });
+          imagePositions.push({ img, x: padding, y: col1Height, w: colWidth, h, name: slot.image.displayName, rotation: slot.image.rotation });
           col1Height += h + gap;
         } else {
-          imagePositions.push({ img, x: padding + colWidth + gap, y: col2Height, w: colWidth, h, name: slot.image.file.name });
+          imagePositions.push({ img, x: padding + colWidth + gap, y: col2Height, w: colWidth, h, name: slot.image.displayName, rotation: slot.image.rotation });
           col2Height += h + gap;
         }
       }
@@ -385,11 +471,22 @@ export default function CollageGenerator() {
 
       // 2. Draw Images
       for (const pos of imagePositions) {
-        ctx.drawImage(pos.img, pos.x, pos.y, pos.w, pos.h);
+        ctx.save();
+        ctx.translate(pos.x + pos.w / 2, pos.y + pos.h / 2);
+        ctx.rotate((pos.rotation * Math.PI) / 180);
+        
+        // Draw image centered
+        // Need to adjust drawing based on rotation
+        const isRotated = pos.rotation % 180 !== 0;
+        const drawW = isRotated ? pos.h : pos.w;
+        const drawH = isRotated ? pos.w : pos.h;
+        
+        ctx.drawImage(pos.img, -drawW / 2, -drawH / 2, drawW, drawH);
+        ctx.restore();
         
         if (showImageNames) {
           ctx.save();
-          const cleanName = pos.name.replace(/\.[^/.]+$/, "").toUpperCase();
+          const cleanName = pos.name.toUpperCase();
           
           // Font settings - optimized for high-res canvas (2400px width)
           ctx.font = "bold 38px sans-serif";
@@ -493,6 +590,8 @@ export default function CollageGenerator() {
       showImageNames={showImageNames}
       isDarkBg={isDarkBg}
       slotInputRefs={slotInputRefs}
+      onRenameSlot={renameSlotImage}
+      onRotateSlot={rotateSlotImage}
     />
   );
 
@@ -560,7 +659,7 @@ export default function CollageGenerator() {
                     )}
                   >
                     <div className={clsx("w-full aspect-square rounded-xl border border-white/10", bg.color)} />
-                    <span className="text-[10px] font-bold uppercase tracking-tighter opacity-60 group-hover:opacity-100 transition-opacity">
+                    <span className={clsx("text-[10px] font-bold uppercase tracking-tighter opacity-60 group-hover:opacity-100 transition-opacity", bg.id === 'white' ? 'text-orange-500' : 'text-white')}>
                       {bg.label}
                     </span>
                     {background === bg.id && !bgImage && (
@@ -720,7 +819,7 @@ export default function CollageGenerator() {
           </div>
 
           <div 
-            className="min-h-[600px] w-full rounded-3xl border-2 border-dashed border-white/10 bg-neutral-900/20 p-8 flex flex-col items-center justify-start gap-8 relative overflow-hidden"
+            className="min-h-[600px] w-full rounded-3xl border-2 border-dashed border-white/10 bg-neutral-900/20 p-8 flex flex-col items-center justify-start gap-8 relative"
           >
             {/* Background Image Preview in Editor */}
             {bgImage && (
@@ -736,15 +835,10 @@ export default function CollageGenerator() {
             >
               <SortableContext 
                 items={slots.map(s => s.id)}
-                strategy={verticalListSortingStrategy}
+                strategy={rectSortingStrategy}
               >
                 <div className="w-full grid grid-cols-2 gap-4 relative z-10 max-w-4xl">
-                  <div className="flex flex-col gap-4">
-                    {col1Slots.map(renderSlot)}
-                  </div>
-                  <div className="flex flex-col gap-4">
-                    {col2Slots.map(renderSlot)}
-                  </div>
+                  {slots.map(renderSlot)}
                 </div>
               </SortableContext>
             </DndContext>
@@ -752,7 +846,7 @@ export default function CollageGenerator() {
             {/* Add New Slot Button */}
             <button 
               onClick={addSlot}
-              className="w-full max-w-4xl h-16 rounded-2xl border-2 border-dashed border-white/5 bg-neutral-900/20 flex items-center justify-center gap-3 hover:bg-emerald-500/5 hover:border-emerald-500/20 transition-all group relative z-10"
+              className="w-full max-w-4xl h-16 rounded-2xl border-2 border-dashed border-orange-500/30 bg-orange-500/5 flex items-center justify-center gap-3 hover:bg-orange-500/10 hover:border-orange-500/50 transition-all group relative z-10"
             >
               <Plus className="w-5 h-5 text-neutral-700 group-hover:text-emerald-500 transition-colors" />
               <span className="text-[10px] font-bold text-neutral-700 uppercase tracking-widest group-hover:text-neutral-400">
