@@ -207,6 +207,7 @@ export default function CollageGenerator() {
   const [bgImage, setBgImage] = useState<ImageInfo | null>(null);
   const [logo, setLogo] = useState<{ file: File; url: string } | null>(null);
   const [showImageNames, setShowImageNames] = useState(false);
+  const [layoutType, setLayoutType] = useState<'2col' | '1col' | '2row' | '2x2' | '1x2'>('2col');
 
   const logoInputRef = useRef<HTMLInputElement>(null);
   const bgImageInputRef = useRef<HTMLInputElement>(null);
@@ -396,17 +397,13 @@ export default function CollageGenerator() {
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    // Layout logic: 2 columns
+    // Layout logic
     const width = 2400;
     const gap = 40;
     const padding = 60;
-    const colWidth = (width - padding * 2 - gap) / 2;
     
-    // Calculate heights for two columns
-    let col1Height = padding;
-    let col2Height = padding;
-    
-    const imagePositions: { img: any; x: number; y: number; w: number; h: number; name: string; rotation: number }[] = [];
+    let imagePositions: { img: any; x: number; y: number; w: number; h: number; name: string; rotation: number }[] = [];
+    let totalHeight = 0;
 
     const loadImage = (url: string): Promise<HTMLImageElement> => {
       return new Promise((resolve, reject) => {
@@ -418,27 +415,76 @@ export default function CollageGenerator() {
     };
 
     try {
-      for (const slot of filledSlots) {
-        if (!slot.image) continue;
-        const img = await loadImage(slot.image.url);
+      const images = await Promise.all(filledSlots.map(async (slot) => {
+        const img = await loadImage(slot.image!.url);
+        const isRotated = slot.image!.rotation % 180 !== 0;
+        const imgW = isRotated ? slot.image!.height : slot.image!.width;
+        const imgH = isRotated ? slot.image!.width : slot.image!.height;
+        return { img, imgW, imgH, name: slot.image!.displayName, rotation: slot.image!.rotation };
+      }));
+
+      if (layoutType === '1col') {
+        const colWidth = width - padding * 2;
+        let y = padding;
+        images.forEach(({ img, imgW, imgH, name, rotation }) => {
+          const h = (colWidth / imgW) * imgH;
+          imagePositions.push({ img, x: padding, y, w: colWidth, h, name, rotation });
+          y += h + gap;
+        });
+        totalHeight = y + (logo ? 200 : 0);
+      } else if (layoutType === '2col') {
+        const colWidth = (width - padding * 2 - gap) / 2;
+        let col1Height = padding;
+        let col2Height = padding;
+        images.forEach(({ img, imgW, imgH, name, rotation }) => {
+          const h = (colWidth / imgW) * imgH;
+          if (col1Height <= col2Height) {
+            imagePositions.push({ img, x: padding, y: col1Height, w: colWidth, h, name, rotation });
+            col1Height += h + gap;
+          } else {
+            imagePositions.push({ img, x: padding + colWidth + gap, y: col2Height, w: colWidth, h, name, rotation });
+            col2Height += h + gap;
+          }
+        });
+        totalHeight = Math.max(col1Height, col2Height) + (logo ? 200 : 0);
+      } else if (layoutType === '2row') {
+        const rowHeight = (width - padding * 2 - gap) / 2; // Simple approach: force square-ish
+        let x = padding;
+        images.forEach(({ img, imgW, imgH, name, rotation }) => {
+          const w = (rowHeight / imgH) * imgW;
+          imagePositions.push({ img, x, y: padding, w, h: rowHeight, name, rotation });
+          x += w + gap;
+        });
+        totalHeight = rowHeight + padding * 2 + (logo ? 200 : 0);
+      } else if (layoutType === '2x2') {
+        const size = (width - padding * 2 - gap) / 2;
+        images.forEach((imgData, i) => {
+          const x = padding + (i % 2) * (size + gap);
+          const y = padding + Math.floor(i / 2) * (size + gap);
+          imagePositions.push({ ...imgData, x, y, w: size, h: size });
+        });
+        totalHeight = size * 2 + gap + padding * 2 + (logo ? 200 : 0);
+      } else if (layoutType === '1x2') {
+        // Large left, 2 small right
+        const leftW = (width - padding * 2 - gap) * 0.6;
+        const rightW = (width - padding * 2 - gap) * 0.4;
+        const rightH = (width - padding * 2 - gap) / 2;
         
-        // Swap dimensions if rotated 90 or 270
-        const isRotated = slot.image.rotation % 180 !== 0;
-        const imgW = isRotated ? slot.image.height : slot.image.width;
-        const imgH = isRotated ? slot.image.width : slot.image.height;
-        
-        const h = (colWidth / imgW) * imgH;
-        
-        if (col1Height <= col2Height) {
-          imagePositions.push({ img, x: padding, y: col1Height, w: colWidth, h, name: slot.image.displayName, rotation: slot.image.rotation });
-          col1Height += h + gap;
-        } else {
-          imagePositions.push({ img, x: padding + colWidth + gap, y: col2Height, w: colWidth, h, name: slot.image.displayName, rotation: slot.image.rotation });
-          col2Height += h + gap;
+        // Image 1: Left
+        if (images[0]) {
+          const h = (leftW / images[0].imgW) * images[0].imgH;
+          imagePositions.push({ ...images[0], x: padding, y: padding, w: leftW, h });
         }
+        // Images 2 & 3: Right
+        let rightY = padding;
+        images.slice(1).forEach((imgData) => {
+          const h = (rightW / imgData.imgW) * imgData.imgH;
+          imagePositions.push({ ...imgData, x: padding + leftW + gap, y: rightY, w: rightW, h });
+          rightY += h + gap;
+        });
+        totalHeight = Math.max(padding + (images[0] ? (leftW / images[0].imgW) * images[0].imgH : 0), rightY) + padding + (logo ? 200 : 0);
       }
 
-      const totalHeight = Math.max(col1Height, col2Height) + padding + (logo ? 200 : 0);
       canvas.width = width;
       canvas.height = totalHeight;
 
@@ -818,6 +864,42 @@ export default function CollageGenerator() {
             </div>
           </div>
 
+          {/* Layout Selection */}
+          <div className="space-y-4 bg-neutral-900/20 p-6 rounded-3xl border border-white/5">
+            <label className="text-xs font-bold text-neutral-500 uppercase tracking-widest flex items-center gap-2">
+              <GripVertical className="w-4 h-4" /> Layout
+            </label>
+            <div className="grid grid-cols-5 gap-2">
+              {(['2col', '1col', '2row', '2x2', '1x2'] as const).map((type) => {
+                const LayoutIcon = () => {
+                  switch (type) {
+                    case '1col': return <svg className="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="6" y="2" width="12" height="20" rx="1"/></svg>;
+                    case '2col': return <svg className="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="2" width="9" height="20" rx="1"/><rect x="13" y="2" width="9" height="20" rx="1"/></svg>;
+                    case '2row': return <svg className="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="2" width="20" height="9" rx="1"/><rect x="2" y="13" width="20" height="9" rx="1"/></svg>;
+                    case '2x2': return <svg className="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="2" width="9" height="9" rx="1"/><rect x="13" y="2" width="9" height="9" rx="1"/><rect x="2" y="13" width="9" height="9" rx="1"/><rect x="13" y="13" width="9" height="9" rx="1"/></svg>;
+                    case '1x2': return <svg className="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="2" width="10" height="20" rx="1"/><rect x="14" y="2" width="8" height="9" rx="1"/><rect x="14" y="13" width="8" height="9" rx="1"/></svg>;
+                    default: return null;
+                  }
+                };
+                return (
+                  <button
+                    key={type}
+                    onClick={() => setLayoutType(type)}
+                    className={clsx(
+                      "flex flex-col items-center justify-center p-2 rounded-lg text-[10px] font-bold uppercase transition-all border gap-1",
+                      layoutType === type 
+                        ? "bg-emerald-500 text-black border-emerald-500" 
+                        : "bg-neutral-800 text-neutral-400 border-white/5 hover:border-white/20"
+                    )}
+                  >
+                    <LayoutIcon />
+                    {type}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
           <div 
             className="min-h-[600px] w-full rounded-3xl border-2 border-dashed border-white/10 bg-neutral-900/20 p-8 flex flex-col items-center justify-start gap-8 relative"
           >
@@ -837,7 +919,10 @@ export default function CollageGenerator() {
                 items={slots.map(s => s.id)}
                 strategy={rectSortingStrategy}
               >
-                <div className="w-full grid grid-cols-2 gap-4 relative z-10 max-w-4xl">
+                <div className={clsx(
+                  "w-full grid gap-4 relative z-10 max-w-4xl",
+                  layoutType === '1col' ? 'grid-cols-1' : 'grid-cols-2'
+                )}>
                   {slots.map(renderSlot)}
                 </div>
               </SortableContext>
