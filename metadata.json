@@ -1,8 +1,5 @@
 {
-  "name": "BANANA PRO Studio",
-  "description": "Professional AI Suite for Architecture and Design",
-  "requestFramePermissions": [
-    "clipboard-read",
-    "display-capture"
-  ]
+  "name": "Module IMG",
+  "description": "Automatically design professional collages with scientific layouts, randomized compositions, and intelligent spacing using AI.",
+  "requestFramePermissions": []
 }
