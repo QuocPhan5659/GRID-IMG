@@ -46,7 +46,9 @@ function SortableSlot({
   isDarkBg, 
   slotInputRefs,
   onRenameSlot,
-  onRotateSlot
+  onRotateSlot,
+  index,
+  layoutType
 }: { 
   slot: GridSlot; 
   onDragOver: any; 
@@ -60,6 +62,8 @@ function SortableSlot({
   slotInputRefs: any;
   onRenameSlot: (id: string, name: string) => void;
   onRotateSlot: (id: string) => void;
+  index: number;
+  layoutType: string;
   key?: string;
 }) {
   const {
@@ -71,12 +75,15 @@ function SortableSlot({
     isDragging
   } = useSortable({ id: slot.id });
 
+  const slotSpecificStyle = (layoutType === '1x2' && index === 0) ? { gridRow: 'span 2' } : {};
+
   const style = {
     transform: CSS.Translate.toString(transform),
     transition: isDragging ? 'none' : transition,
     zIndex: isDragging ? 50 : undefined,
     opacity: isDragging ? 0.8 : 1,
     touchAction: 'none',
+    ...slotSpecificStyle
   };
 
   const cleanName = slot.image ? slot.image.displayName : "";
@@ -99,10 +106,10 @@ function SortableSlot({
       {...attributes}
       {...listeners}
       className={clsx(
-        "relative group rounded-2xl overflow-hidden border-2 border-dashed transition-all duration-200 cursor-grab active:cursor-grabbing",
+        "relative group rounded-[2cqw] overflow-hidden border-2 border-dashed transition-all duration-200 cursor-grab active:cursor-grabbing w-full h-full min-h-[120px]",
         slot.image 
-          ? "border-white/10 bg-black/40 shadow-xl" 
-          : "border-emerald-500/30 bg-emerald-500/5 hover:border-emerald-500/50 hover:bg-emerald-500/10 min-h-[120px]"
+          ? "border-white/10 bg-transparent shadow-xl" 
+          : "border-purple-500/30 bg-purple-500/5 hover:border-purple-500/50 hover:bg-purple-500/10"
       )}
       onDragOver={onDragOver}
       onDrop={(e) => onDropToSlot(e, slot.id)}
@@ -116,19 +123,24 @@ function SortableSlot({
       />
       
       {slot.image ? (
-        <div className="w-full h-full relative">
-          <img 
-            src={slot.image.url} 
-            className="w-full h-full object-contain pointer-events-none select-none" 
-            alt={slot.image.file.name} 
+        <div 
+          className="w-full h-full relative flex items-center justify-center bg-transparent"
+          style={{ containerType: 'size' }}
+        >
+          <div 
+            className="absolute flex items-center justify-center transition-all duration-300"
             style={{
-              aspectRatio: slot.image.rotation % 180 === 0 
-                ? `${slot.image.width} / ${slot.image.height}` 
-                : `${slot.image.height} / ${slot.image.width}`,
+              width: slot.image.rotation % 180 !== 0 ? '100cqh' : '100cqw',
+              height: slot.image.rotation % 180 !== 0 ? '100cqw' : '100cqh',
               transform: `rotate(${slot.image.rotation}deg)`,
-              transition: 'transform 0.3s ease-in-out, aspect-ratio 0.3s ease-in-out'
             }}
-          />
+          >
+            <img 
+              src={slot.image.url} 
+              className="w-full h-full object-contain pointer-events-none select-none" 
+              alt={slot.image.file.name} 
+            />
+          </div>
           {showImageNames && (
             <div 
               className={clsx(
@@ -152,7 +164,7 @@ function SortableSlot({
               ) : (
                 <>
                   <span onDoubleClick={(e) => { e.stopPropagation(); setIsRenaming(true); }}>{cleanName}</span>
-                  <Pencil className="w-3 h-3 cursor-pointer hover:text-emerald-500" onClick={(e) => { e.stopPropagation(); setIsRenaming(true); }} />
+                  <Pencil className="w-3 h-3 cursor-pointer hover:text-purple-500" onClick={(e) => { e.stopPropagation(); setIsRenaming(true); }} />
                 </>
               )}
             </div>
@@ -180,7 +192,7 @@ function SortableSlot({
           className="w-full h-full flex flex-col items-center justify-center cursor-pointer p-4"
           onClick={() => slotInputRefs.current[slot.id]?.click()}
         >
-          <Upload className="w-6 h-6 text-neutral-600 mb-2 group-hover:text-emerald-500 transition-colors pointer-events-none" />
+          <Upload className="w-6 h-6 text-neutral-600 mb-2 group-hover:text-purple-500 transition-colors pointer-events-none" />
           <span className="text-[8px] font-bold text-neutral-600 uppercase tracking-widest group-hover:text-neutral-400 transition-colors pointer-events-none">
             Upload
           </span>
@@ -204,10 +216,18 @@ export default function CollageGenerator() {
     { id: "3", image: null },
   ]);
   const [background, setBackground] = useState<"gray-black" | "brown-black" | "white">("gray-black");
+  const [ratio, setRatio] = useState<string>('1:1');
   const [bgImage, setBgImage] = useState<ImageInfo | null>(null);
   const [logo, setLogo] = useState<{ file: File; url: string } | null>(null);
   const [showImageNames, setShowImageNames] = useState(false);
   const [layoutType, setLayoutType] = useState<'2col' | '1col' | '2row' | '2x2' | '1x2'>('2col');
+
+  const ratioConfigs = [
+    { id: '16:9', value: 16/9 },
+    { id: '1:1', value: 1 },
+    { id: '3:2', value: 3/2 },
+    { id: '4:3', value: 4/3 },
+  ];
 
   const logoInputRef = useRef<HTMLInputElement>(null);
   const bgImageInputRef = useRef<HTMLInputElement>(null);
@@ -397,13 +417,25 @@ export default function CollageGenerator() {
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    // Layout logic
+    // Layout logic mapping perfect to grid
     const width = 2400;
+    const ratioValue = ratioConfigs.find(r => r.id === ratio)?.value || 1;
+    const height = Math.round(width / ratioValue);
+    
+    // Determine canvas final output height (incorporating logo below grid if present)
+    const logoAreaHeight = logo ? 200 : 0;
+    const totalHeight = height + logoAreaHeight;
+    
+    canvas.width = width;
+    canvas.height = totalHeight;
+
     const gap = 40;
     const padding = 60;
     
-    let imagePositions: { img: any; x: number; y: number; w: number; h: number; name: string; rotation: number }[] = [];
-    let totalHeight = 0;
+    const gridW = width - padding * 2;
+    const gridH = height - padding * 2;
+    
+    let imagePositions: { img: HTMLImageElement; x: number; y: number; w: number; h: number; name: string; rotation: number }[] = [];
 
     const loadImage = (url: string): Promise<HTMLImageElement> => {
       return new Promise((resolve, reject) => {
@@ -417,76 +449,62 @@ export default function CollageGenerator() {
     try {
       const images = await Promise.all(filledSlots.map(async (slot) => {
         const img = await loadImage(slot.image!.url);
-        const isRotated = slot.image!.rotation % 180 !== 0;
-        const imgW = isRotated ? slot.image!.height : slot.image!.width;
-        const imgH = isRotated ? slot.image!.width : slot.image!.height;
+        const imgW = img.width;
+        const imgH = img.height;
         return { img, imgW, imgH, name: slot.image!.displayName, rotation: slot.image!.rotation };
       }));
 
+      const count = images.length;
+
       if (layoutType === '1col') {
-        const colWidth = width - padding * 2;
-        let y = padding;
-        images.forEach(({ img, imgW, imgH, name, rotation }) => {
-          const h = (colWidth / imgW) * imgH;
-          imagePositions.push({ img, x: padding, y, w: colWidth, h, name, rotation });
-          y += h + gap;
+        const rows = count || 1;
+        const cellH = (gridH - gap * (rows - 1)) / rows;
+        images.forEach((imgData, i) => {
+          imagePositions.push({ ...imgData, x: padding, y: padding + i * (cellH + gap), w: gridW, h: cellH });
         });
-        totalHeight = y + (logo ? 200 : 0);
       } else if (layoutType === '2col') {
-        const colWidth = (width - padding * 2 - gap) / 2;
-        let col1Height = padding;
-        let col2Height = padding;
-        images.forEach(({ img, imgW, imgH, name, rotation }) => {
-          const h = (colWidth / imgW) * imgH;
-          if (col1Height <= col2Height) {
-            imagePositions.push({ img, x: padding, y: col1Height, w: colWidth, h, name, rotation });
-            col1Height += h + gap;
+        const cols = 2;
+        const rows = Math.ceil(count / 2) || 1;
+        const cellW = (gridW - gap) / 2;
+        const cellH = (gridH - gap * (rows - 1)) / rows;
+        images.forEach((imgData, i) => {
+          const c = i % cols;
+          const r = Math.floor(i / cols);
+          imagePositions.push({ ...imgData, x: padding + c * (cellW + gap), y: padding + r * (cellH + gap), w: cellW, h: cellH });
+        });
+      } else if (layoutType === '2row') {
+        const rows = 2;
+        const cols = Math.ceil(count / 2) || 1;
+        const cellW = (gridW - gap * (cols - 1)) / cols;
+        const cellH = (gridH - gap) / 2;
+        images.forEach((imgData, i) => {
+          const c = Math.floor(i / rows);
+          const r = i % rows;
+          imagePositions.push({ ...imgData, x: padding + c * (cellW + gap), y: padding + r * (cellH + gap), w: cellW, h: cellH });
+        });
+      } else if (layoutType === '2x2') {
+        const cols = 2;
+        const rows = 2;
+        const cellW = (gridW - gap) / 2;
+        const cellH = (gridH - gap) / 2;
+        images.forEach((imgData, i) => {
+          const c = i % cols;
+          const r = Math.floor(i / cols);
+          imagePositions.push({ ...imgData, x: padding + c * (cellW + gap), y: padding + r * (cellH + gap), w: cellW, h: cellH });
+        });
+      } else if (layoutType === '1x2') {
+        const leftW = (gridW - gap) * 0.6;
+        const rightW = gridW - gap - leftW;
+        const rightH = (gridH - gap) / 2;
+        images.forEach((imgData, i) => {
+          if (i === 0) {
+            imagePositions.push({ ...imgData, x: padding, y: padding, w: leftW, h: gridH });
           } else {
-            imagePositions.push({ img, x: padding + colWidth + gap, y: col2Height, w: colWidth, h, name, rotation });
-            col2Height += h + gap;
+            const r = (i - 1) % 2; // For >3 images, they just stack perfectly over the right slots
+            imagePositions.push({ ...imgData, x: padding + leftW + gap, y: padding + r * (rightH + gap), w: rightW, h: rightH });
           }
         });
-        totalHeight = Math.max(col1Height, col2Height) + (logo ? 200 : 0);
-      } else if (layoutType === '2row') {
-        const rowHeight = (width - padding * 2 - gap) / 2; // Simple approach: force square-ish
-        let x = padding;
-        images.forEach(({ img, imgW, imgH, name, rotation }) => {
-          const w = (rowHeight / imgH) * imgW;
-          imagePositions.push({ img, x, y: padding, w, h: rowHeight, name, rotation });
-          x += w + gap;
-        });
-        totalHeight = rowHeight + padding * 2 + (logo ? 200 : 0);
-      } else if (layoutType === '2x2') {
-        const size = (width - padding * 2 - gap) / 2;
-        images.forEach((imgData, i) => {
-          const x = padding + (i % 2) * (size + gap);
-          const y = padding + Math.floor(i / 2) * (size + gap);
-          imagePositions.push({ ...imgData, x, y, w: size, h: size });
-        });
-        totalHeight = size * 2 + gap + padding * 2 + (logo ? 200 : 0);
-      } else if (layoutType === '1x2') {
-        // Large left, 2 small right
-        const leftW = (width - padding * 2 - gap) * 0.6;
-        const rightW = (width - padding * 2 - gap) * 0.4;
-        const rightH = (width - padding * 2 - gap) / 2;
-        
-        // Image 1: Left
-        if (images[0]) {
-          const h = (leftW / images[0].imgW) * images[0].imgH;
-          imagePositions.push({ ...images[0], x: padding, y: padding, w: leftW, h });
-        }
-        // Images 2 & 3: Right
-        let rightY = padding;
-        images.slice(1).forEach((imgData) => {
-          const h = (rightW / imgData.imgW) * imgData.imgH;
-          imagePositions.push({ ...imgData, x: padding + leftW + gap, y: rightY, w: rightW, h });
-          rightY += h + gap;
-        });
-        totalHeight = Math.max(padding + (images[0] ? (leftW / images[0].imgW) * images[0].imgH : 0), rightY) + padding + (logo ? 200 : 0);
       }
-
-      canvas.width = width;
-      canvas.height = totalHeight;
 
       // 1. Draw Background
       if (bgImage) {
@@ -515,19 +533,46 @@ export default function CollageGenerator() {
         ctx.fillRect(0, 0, width, totalHeight);
       }
 
-      // 2. Draw Images
+      // 2. Draw Images perfectly within computed rect mapped to Object Cover approach
       for (const pos of imagePositions) {
         ctx.save();
+        
+        // Setup clip for rounded corners exactly like preview
+        const cornerRadius = 40;
+        ctx.beginPath();
+        if (ctx.roundRect) {
+          ctx.roundRect(pos.x, pos.y, pos.w, pos.h, cornerRadius);
+        } else {
+          ctx.rect(pos.x, pos.y, pos.w, pos.h);
+        }
+        ctx.clip();
+
         ctx.translate(pos.x + pos.w / 2, pos.y + pos.h / 2);
         ctx.rotate((pos.rotation * Math.PI) / 180);
         
-        // Draw image centered
-        // Need to adjust drawing based on rotation
+        // Determine object contain coordinates mapping
         const isRotated = pos.rotation % 180 !== 0;
-        const drawW = isRotated ? pos.h : pos.w;
-        const drawH = isRotated ? pos.w : pos.h;
+        const drawBoundW = isRotated ? pos.h : pos.w;
+        const drawBoundH = isRotated ? pos.w : pos.h;
+
+        const imgAspect = pos.img.width / pos.img.height;
+        const rectAspect = drawBoundW / drawBoundH;
         
-        ctx.drawImage(pos.img, -drawW / 2, -drawH / 2, drawW, drawH);
+        let dx, dy, dw, dh;
+        
+        if (imgAspect > rectAspect) {
+          dw = drawBoundW;
+          dh = drawBoundW / imgAspect;
+          dx = -dw / 2;
+          dy = -dh / 2;
+        } else {
+          dh = drawBoundH;
+          dw = drawBoundH * imgAspect;
+          dx = -dw / 2;
+          dy = -dh / 2;
+        }
+        
+        ctx.drawImage(pos.img, dx, dy, dw, dh);
         ctx.restore();
         
         if (showImageNames) {
@@ -604,29 +649,23 @@ export default function CollageGenerator() {
 
   const isDarkBg = background !== "white";
 
-  // Masonry layout logic for preview
-  const col1Slots: GridSlot[] = [];
-  const col2Slots: GridSlot[] = [];
-  let h1 = 0;
-  let h2 = 0;
-
-  slots.forEach((slot) => {
-    const aspect = slot.image ? slot.image.width / slot.image.height : 1.5;
-    const relativeHeight = 1 / aspect;
-
-    if (h1 <= h2) {
-      col1Slots.push(slot);
-      h1 += relativeHeight;
-    } else {
-      col2Slots.push(slot);
-      h2 += relativeHeight;
+  const getGridStyle = (type: string, count: number) => {
+    switch (type) {
+        case '1col': return { gridTemplateColumns: 'minmax(0, 1fr)', gridTemplateRows: `repeat(${count || 1}, minmax(0, 1fr))` };
+        case '2col': return { gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gridTemplateRows: `repeat(${Math.ceil(count / 2) || 1}, minmax(0, 1fr))` };
+        case '2row': return { gridTemplateRows: 'repeat(2, minmax(0, 1fr))', gridAutoFlow: 'column', gridTemplateColumns: `repeat(${Math.ceil(count / 2) || 1}, minmax(0, 1fr))` };
+        case '2x2': return { gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gridTemplateRows: 'repeat(2, minmax(0, 1fr))' };
+        case '1x2': return { gridTemplateColumns: '1.5fr 1fr', gridTemplateRows: 'repeat(2, minmax(0, 1fr))' };
+        default: return {};
     }
-  });
+  };
 
-  const renderSlot = (slot: GridSlot) => (
+  const renderSlot = (slot: GridSlot, index: number) => (
     <SortableSlot 
       key={slot.id} 
       slot={slot} 
+      index={index}
+      layoutType={layoutType}
       onDragOver={onDragOver}
       onDropToSlot={onDropToSlot}
       handleSlotUpload={handleSlotUpload}
@@ -647,13 +686,15 @@ export default function CollageGenerator() {
         
         {/* Sidebar Controls */}
         <div className="lg:col-span-4 space-y-8">
-          <div className="space-y-2">
-            <h1 className={clsx("text-4xl font-bold tracking-tight", inkColors[background])}>
-              Grid Builder
+          <div className="space-y-4 text-center lg:text-left">
+            <h1 className="text-4xl md:text-5xl font-black tracking-tighter bg-gradient-to-r from-fuchsia-400 to-purple-600 bg-clip-text text-transparent uppercase inline-block">
+              SuQ GRIDs
             </h1>
-            <p className="text-neutral-500 text-sm">
-              Manual layout with drag-and-drop cells.
-            </p>
+            <div className="inline-flex items-center justify-center p-[1px] rounded-full bg-gradient-to-r from-neutral-800 to-neutral-700">
+              <div className="px-4 py-1.5 rounded-full bg-[#111] text-purple-400 font-mono text-[10px] sm:text-xs">
+                <span className="font-bold">Zalo QuocPhan:</span> 0938355659
+              </div>
+            </div>
           </div>
 
           <div className="flex gap-2">
@@ -683,9 +724,32 @@ export default function CollageGenerator() {
 
           <div className="space-y-6 bg-neutral-900/10 p-6 rounded-3xl border border-white/5 backdrop-blur-sm">
             
+            {/* Ratio Selection */}
+            <div className="space-y-4">
+              <label className="text-xs font-bold text-purple-400/80 uppercase tracking-widest flex items-center gap-2">
+                <ImageIcon className="w-4 h-4" /> Ratio
+              </label>
+              <div className="grid grid-cols-4 gap-2">
+                {ratioConfigs.map((r) => (
+                  <button
+                    key={r.id}
+                    onClick={() => setRatio(r.id)}
+                    className={clsx(
+                      "py-2 rounded-lg text-[10px] font-bold uppercase transition-all border",
+                      ratio === r.id
+                        ? "bg-purple-500 text-black border-purple-500" 
+                        : "bg-neutral-800 text-neutral-400 border-white/5 hover:border-white/20"
+                    )}
+                  >
+                    {r.id}
+                  </button>
+                ))}
+              </div>
+            </div>
+
             {/* Background Selection */}
             <div className="space-y-4">
-              <label className="text-xs font-bold text-neutral-500 uppercase tracking-widest flex items-center gap-2">
+              <label className="text-xs font-bold text-purple-400/80 uppercase tracking-widest flex items-center gap-2">
                 <Palette className="w-4 h-4" /> Background
               </label>
               <div className="grid grid-cols-3 gap-3">
@@ -700,7 +764,7 @@ export default function CollageGenerator() {
                     className={clsx(
                       "group relative flex flex-col items-center gap-2 p-2 rounded-2xl border transition-all",
                       background === bg.id && !bgImage
-                        ? "border-emerald-500 bg-emerald-500/5 shadow-lg shadow-emerald-500/10" 
+                        ? "border-purple-500 bg-purple-500/5 shadow-lg shadow-purple-500/10" 
                         : "border-white/5 bg-neutral-900/20 hover:border-white/20"
                     )}
                   >
@@ -709,7 +773,7 @@ export default function CollageGenerator() {
                       {bg.label}
                     </span>
                     {background === bg.id && !bgImage && (
-                      <CheckCircle2 className="absolute -top-1 -right-1 w-4 h-4 text-emerald-500 fill-neutral-950" />
+                      <CheckCircle2 className="absolute -top-1 -right-1 w-4 h-4 text-purple-500 fill-neutral-950" />
                     )}
                   </button>
                 ))}
@@ -720,7 +784,7 @@ export default function CollageGenerator() {
                 onClick={() => bgImageInputRef.current?.click()}
                 className={clsx(
                   "relative h-20 border-2 border-dashed rounded-2xl flex flex-col items-center justify-center cursor-pointer transition-all overflow-hidden group mt-2",
-                  bgImage ? "border-emerald-500/50 bg-emerald-500/5" : "border-white/10 hover:border-white/20"
+                  bgImage ? "border-purple-500/50 bg-purple-500/5" : "border-white/10 hover:border-white/20"
                 )}
               >
                 <input
@@ -745,7 +809,7 @@ export default function CollageGenerator() {
                   </>
                 ) : (
                   <>
-                    <ImagePlus className="w-5 h-5 text-neutral-500 group-hover:text-emerald-500 transition-colors" />
+                    <ImagePlus className="w-5 h-5 text-neutral-500 group-hover:text-purple-500 transition-colors" />
                     <span className="text-[10px] text-neutral-500 font-bold mt-1 uppercase">Custom BG Image</span>
                   </>
                 )}
@@ -754,14 +818,14 @@ export default function CollageGenerator() {
 
             {/* Brand Logo */}
             <div className="space-y-4">
-              <label className="text-xs font-bold text-neutral-500 uppercase tracking-widest flex items-center gap-2">
+              <label className="text-xs font-bold text-purple-400/80 uppercase tracking-widest flex items-center gap-2">
                 <ImageIcon className="w-4 h-4" /> Brand Logo
               </label>
               <div 
                 onClick={() => logoInputRef.current?.click()}
                 className={clsx(
                   "relative h-24 border-2 border-dashed rounded-2xl flex flex-col items-center justify-center cursor-pointer transition-all overflow-hidden group",
-                  logo ? "border-emerald-500/50 bg-emerald-500/5" : "border-white/10 hover:border-white/20"
+                  logo ? "border-purple-500/50 bg-purple-500/5" : "border-white/10 hover:border-white/20"
                 )}
               >
                 <input
@@ -783,7 +847,7 @@ export default function CollageGenerator() {
                   </>
                 ) : (
                   <>
-                    <Upload className="w-6 h-6 text-neutral-500 group-hover:text-emerald-500 transition-colors" />
+                    <Upload className="w-6 h-6 text-neutral-500 group-hover:text-purple-500 transition-colors" />
                     <span className="text-[10px] text-neutral-500 font-bold mt-2 uppercase">Upload Logo</span>
                   </>
                 )}
@@ -793,14 +857,14 @@ export default function CollageGenerator() {
             {/* Toggle Name */}
             <div className="flex items-center justify-between p-4 bg-neutral-900/20 rounded-2xl border border-white/5">
               <div className="flex items-center gap-3">
-                <Type className="w-4 h-4 text-neutral-500" />
-                <span className="text-xs font-bold text-neutral-400 uppercase tracking-wider">Show Image Names</span>
+                <Type className="w-4 h-4 text-purple-400/80" />
+                <span className="text-xs font-bold text-purple-400/80 uppercase tracking-wider">Show Image Names</span>
               </div>
               <button
                 onClick={() => setShowImageNames(!showImageNames)}
                 className={clsx(
                   "w-12 h-6 rounded-full transition-all relative",
-                  showImageNames ? "bg-emerald-500" : "bg-neutral-800"
+                  showImageNames ? "bg-purple-500" : "bg-neutral-800"
                 )}
               >
                 <div className={clsx(
@@ -819,7 +883,7 @@ export default function CollageGenerator() {
               "w-full py-5 rounded-3xl font-bold text-sm tracking-widest transition-all flex items-center justify-center gap-3 uppercase shadow-2xl",
               (slots.every(s => !s.image) || isDownloading)
                 ? "bg-neutral-800 text-neutral-600 cursor-not-allowed"
-                : "bg-emerald-500 text-black hover:scale-[1.02] active:scale-95 shadow-emerald-500/20"
+                : "bg-purple-500 text-black hover:scale-[1.02] active:scale-95 shadow-purple-500/20"
             )}
           >
             {isDownloading ? (
@@ -840,7 +904,7 @@ export default function CollageGenerator() {
         <div className="lg:col-span-8 space-y-6">
           {/* Bulk Upload Area */}
           <div 
-            className="w-full h-32 rounded-3xl border-2 border-dashed border-emerald-500/20 bg-emerald-500/5 flex flex-col items-center justify-center cursor-pointer hover:bg-emerald-500/10 transition-all group"
+            className="w-full h-32 rounded-3xl border-2 border-dashed border-purple-500/20 bg-purple-500/5 flex flex-col items-center justify-center cursor-pointer hover:bg-purple-500/10 transition-all group"
             onClick={() => bulkInputRef.current?.click()}
             onDragOver={onDragOver}
             onDrop={onDropBulk}
@@ -854,19 +918,19 @@ export default function CollageGenerator() {
               className="hidden"
             />
             <div className="flex items-center gap-3">
-              <div className="p-2 bg-emerald-500 rounded-full text-black">
+              <div className="p-2 bg-purple-500 rounded-full text-black">
                 <Plus className="w-5 h-5" />
               </div>
               <div className="text-left">
-                <span className="block text-sm font-bold text-emerald-500 uppercase tracking-widest">Tải lên nhiều ảnh (Bulk Upload)</span>
-                <span className="block text-[10px] text-emerald-500/60 font-medium uppercase">Kéo thả hoặc click để thêm nhiều ảnh cùng lúc</span>
+                <span className="block text-sm font-bold text-purple-500 uppercase tracking-widest">Tải lên nhiều ảnh (Bulk Upload)</span>
+                <span className="block text-[10px] text-purple-500/60 font-medium uppercase">Kéo thả hoặc click để thêm nhiều ảnh cùng lúc</span>
               </div>
             </div>
           </div>
 
           {/* Layout Selection */}
           <div className="space-y-4 bg-neutral-900/20 p-6 rounded-3xl border border-white/5">
-            <label className="text-xs font-bold text-neutral-500 uppercase tracking-widest flex items-center gap-2">
+            <label className="text-xs font-bold text-purple-400/80 uppercase tracking-widest flex items-center gap-2">
               <GripVertical className="w-4 h-4" /> Layout
             </label>
             <div className="grid grid-cols-5 gap-2">
@@ -888,7 +952,7 @@ export default function CollageGenerator() {
                     className={clsx(
                       "flex flex-col items-center justify-center p-2 rounded-lg text-[10px] font-bold uppercase transition-all border gap-1",
                       layoutType === type 
-                        ? "bg-emerald-500 text-black border-emerald-500" 
+                        ? "bg-purple-500 text-black border-purple-500" 
                         : "bg-neutral-800 text-neutral-400 border-white/5 hover:border-white/20"
                     )}
                   >
@@ -900,15 +964,25 @@ export default function CollageGenerator() {
             </div>
           </div>
 
-          <div 
-            className="min-h-[600px] w-full rounded-3xl border-2 border-dashed border-white/10 bg-neutral-900/20 p-8 flex flex-col items-center justify-start gap-8 relative"
-          >
-            {/* Background Image Preview in Editor */}
-            {bgImage && (
-              <div className="absolute inset-0 z-0 opacity-20">
-                <img src={bgImage.url} className="w-full h-full object-cover" alt="Editor BG" />
-              </div>
-            )}
+          <div className="w-full bg-neutral-900/20 rounded-3xl border border-white/10 p-4 lg:p-8 flex items-center justify-center min-h-[600px] relative overflow-hidden">
+            {/* The Actual Preview Container matching Ratio */}
+            <div 
+              className={clsx(
+                "relative flex transition-all duration-300 shadow-2xl overflow-hidden",
+                bgColors[background]
+              )}
+              style={{
+                aspectRatio: ratioConfigs.find(r => r.id === ratio)?.value || 1,
+                maxHeight: '700px',
+                maxWidth: '100%',
+                backgroundImage: bgImage ? `url(${bgImage.url})` : undefined,
+                backgroundSize: 'cover',
+                backgroundPosition: 'center',
+                width: '100%',
+                ...(((ratioConfigs.find(r => r.id === ratio)?.value || 1) < 1) ? { width: 'auto', height: '100%' } : { width: '100%', height: 'auto' })
+              }}
+            >
+              {bgImage && <div className="absolute inset-0 bg-black/20" />} 
 
             <DndContext 
               sensors={sensors}
@@ -919,25 +993,32 @@ export default function CollageGenerator() {
                 items={slots.map(s => s.id)}
                 strategy={rectSortingStrategy}
               >
-                <div className={clsx(
-                  "w-full grid gap-4 relative z-10 max-w-4xl",
-                  layoutType === '1col' ? 'grid-cols-1' : 'grid-cols-2'
-                )}>
-                  {slots.map(renderSlot)}
+                <div 
+                  className="w-full h-full relative z-10 p-4 sm:p-6 lg:p-10"
+                  style={{
+                    display: 'grid',
+                    gap: '12px',
+                    ...getGridStyle(layoutType, slots.length)
+                  }}
+                >
+                  {slots.map((slot, i) => renderSlot(slot, i))}
                 </div>
               </SortableContext>
             </DndContext>
-
-            {/* Add New Slot Button */}
-            <button 
-              onClick={addSlot}
-              className="w-full max-w-4xl h-16 rounded-2xl border-2 border-dashed border-orange-500/30 bg-orange-500/5 flex items-center justify-center gap-3 hover:bg-orange-500/10 hover:border-orange-500/50 transition-all group relative z-10"
-            >
-              <Plus className="w-5 h-5 text-neutral-700 group-hover:text-emerald-500 transition-colors" />
-              <span className="text-[10px] font-bold text-neutral-700 uppercase tracking-widest group-hover:text-neutral-400">
-                Add New Slot
-              </span>
-            </button>
+            </div>
+            
+            {/* Add New Slot Button (Floating over container) */}
+            <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-20">
+              <button 
+                onClick={addSlot}
+                className="h-10 px-6 rounded-full border border-purple-500/30 bg-black/80 backdrop-blur-md flex items-center justify-center gap-2 hover:bg-purple-500/20 hover:border-purple-500/50 transition-all group shadow-2xl text-white"
+              >
+                <Plus className="w-4 h-4 group-hover:text-purple-500 transition-colors" />
+                <span className="text-[10px] font-bold uppercase tracking-widest group-hover:text-purple-400">
+                  Add New Slot
+                </span>
+              </button>
+            </div>
           </div>
 
           {/* Logo Overlay on Canvas */}
